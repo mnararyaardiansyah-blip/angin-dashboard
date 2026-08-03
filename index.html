@@ -1,0 +1,451 @@
+```html
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Dashboard Monitoring Angin & Tekanan</title>
+
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
+
+<style>
+:root{
+    --bg:#0f172a;
+    --card:#1e293b;
+    --text:#e2e8f0;
+    --muted:#94a3b8;
+}
+
+*{
+    box-sizing:border-box;
+}
+
+body{
+    margin:0;
+    padding:20px;
+    background:var(--bg);
+    color:var(--text);
+    font-family:Arial, sans-serif;
+}
+
+.container{
+    max-width:1400px;
+    margin:auto;
+}
+
+.header{
+    margin-bottom:20px;
+}
+
+.header h1{
+    margin:0;
+    font-size:28px;
+}
+
+.status-card{
+    background:var(--card);
+    border-radius:16px;
+    padding:15px 20px;
+    margin-top:15px;
+}
+
+.sensor-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(450px,1fr));
+    gap:30px;
+    margin-top:20px;
+}
+
+.card{
+    background:var(--card);
+    border-radius:18px;
+    padding:24px;
+    box-shadow:0 8px 20px rgba(0,0,0,.25);
+}
+
+.card h2{
+    margin:0;
+    font-size:22px;
+    font-weight:600;
+}
+
+.value{
+    font-size:68px;
+    font-weight:700;
+    margin-top:20px;
+    line-height:1;
+}
+
+.unit{
+    color:var(--muted);
+    font-size:18px;
+    margin-top:10px;
+}
+
+.mini-chart{
+    margin-top:25px;
+    height:180px;
+}
+
+.mini-chart canvas{
+    width:100% !important;
+    height:180px !important;
+    background:#ffffff;
+    border-radius:12px;
+}
+
+.button-area{
+    margin-top:15px;
+}
+
+button{
+    border:none;
+    border-radius:10px;
+    padding:10px 16px;
+    cursor:pointer;
+    font-weight:bold;
+}
+
+@media(max-width:768px){
+
+    .sensor-grid{
+        grid-template-columns:1fr;
+    }
+
+    .value{
+        font-size:52px;
+    }
+
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="header">
+        <h1>Dashboard Monitoring Sensor</h1>
+
+        <div class="status-card">
+            Status MQTT :
+            <span id="status">🔴 Tidak Terhubung</span>
+        </div>
+
+        <div class="button-area">
+            <button onclick="resetAllZoom()">
+                Reset Zoom
+            </button>
+        </div>
+    </div>
+
+    <div class="sensor-grid">
+
+        <!-- ANGIN -->
+        <div class="card">
+
+            <h2>🌬️ Kecepatan Angin</h2>
+
+            <div id="speed" class="value">
+                0.00
+            </div>
+
+            <div class="unit">
+                knot
+            </div>
+
+            <div class="mini-chart">
+                <canvas id="windChart"></canvas>
+            </div>
+
+        </div>
+
+        <!-- TEKANAN -->
+        <div class="card">
+
+            <h2>⚙️ Tekanan</h2>
+
+            <div id="pressure" class="value">
+                0.000
+            </div>
+
+            <div class="unit">
+                bar
+            </div>
+
+            <div class="mini-chart">
+                <canvas id="pressureChart"></canvas>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+// =========================
+// MQTT CONFIG
+// =========================
+
+const broker = "ws://192.168.80.99:9001";
+
+const TOPIC_WIND = "wind/speed";
+const TOPIC_PRESSURE = "sensor/tekanan";
+
+// =========================
+// DATA STORAGE
+// =========================
+
+const windLabels = [];
+const windValues = [];
+
+const pressureLabels = [];
+const pressureValues = [];
+
+// =========================
+// CHART FACTORY
+// =========================
+
+function createChart(canvasId, label){
+
+    return new Chart(
+        document.getElementById(canvasId),
+        {
+            type: "line",
+
+            data: {
+                labels: [],
+                datasets: [{
+                    label: label,
+                    data: [],
+                    borderWidth: 2,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+
+            options: {
+
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+
+                plugins: {
+
+                    legend: {
+                        display: false
+                    },
+
+                    zoom: {
+
+                        pan: {
+                            enabled: true,
+                            mode: "x"
+                        },
+
+                        zoom: {
+
+                            wheel: {
+                                enabled: true
+                            },
+
+                            pinch: {
+                                enabled: true
+                            },
+
+                            mode: "x"
+                        }
+                    }
+                },
+
+                scales: {
+
+                    x: {
+                        ticks: {
+                            maxTicksLimit: 5
+                        }
+                    }
+
+                }
+            }
+        }
+    );
+}
+
+// =========================
+// CREATE CHARTS
+// =========================
+
+const windChart =
+createChart(
+    "windChart",
+    "Kecepatan Angin"
+);
+
+const pressureChart =
+createChart(
+    "pressureChart",
+    "Tekanan"
+);
+
+// =========================
+// RESET ZOOM
+// =========================
+
+function resetAllZoom(){
+
+    windChart.resetZoom();
+    pressureChart.resetZoom();
+
+}
+
+// =========================
+// MQTT CONNECT
+// =========================
+
+const client =
+mqtt.connect(broker);
+
+client.on("connect", () => {
+
+    document.getElementById("status").innerHTML =
+        "🟢 Terhubung";
+
+    client.subscribe(TOPIC_WIND);
+    client.subscribe(TOPIC_PRESSURE);
+
+    console.log("MQTT Connected");
+
+});
+
+client.on("close", () => {
+
+    document.getElementById("status").innerHTML =
+        "🟡 Terputus";
+
+});
+
+client.on("error", () => {
+
+    document.getElementById("status").innerHTML =
+        "🔴 Error";
+
+});
+
+// =========================
+// MQTT MESSAGE
+// =========================
+
+client.on("message", (topic, message) => {
+
+    try {
+
+        const data =
+        JSON.parse(
+            message.toString()
+        );
+
+        const now =
+        new Date()
+        .toLocaleTimeString();
+
+        // =====================
+        // ANGIN
+        // =====================
+
+        if(
+            topic === TOPIC_WIND &&
+            data.kecepatan_angin_knot !== undefined
+        ){
+
+            const speed =
+            Number(
+                data.kecepatan_angin_knot
+            );
+
+            document.getElementById("speed")
+            .innerHTML =
+            speed.toFixed(2);
+
+            windLabels.push(now);
+            windValues.push(speed);
+
+            if(windLabels.length > 5000){
+
+                windLabels.shift();
+                windValues.shift();
+
+            }
+
+            windChart.data.labels =
+            windLabels;
+
+            windChart.data.datasets[0].data =
+            windValues;
+
+            windChart.update();
+
+        }
+
+        // =====================
+        // TEKANAN
+        // =====================
+
+        if(
+            topic === TOPIC_PRESSURE &&
+            data.pressure_avg !== undefined
+        ){
+
+            const pressure =
+            Number(
+                data.pressure_avg
+            );
+
+            document.getElementById("pressure")
+            .innerHTML =
+            pressure.toFixed(3);
+
+            pressureLabels.push(now);
+            pressureValues.push(
+                pressure
+            );
+
+            if(
+                pressureLabels.length > 5000
+            ){
+
+                pressureLabels.shift();
+                pressureValues.shift();
+
+            }
+
+            pressureChart.data.labels =
+            pressureLabels;
+
+            pressureChart.data.datasets[0].data =
+            pressureValues;
+
+            pressureChart.update();
+
+        }
+
+    }
+    catch(error){
+
+        console.error(error);
+
+    }
+
+});
+
+</script>
+
+</body>
+</html>
+```
